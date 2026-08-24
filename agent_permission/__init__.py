@@ -29,7 +29,7 @@ def get_current_context() -> PermissionContext | None:
 def set_current_context(context: PermissionContext) -> None:
     _current_context.set(context)
 
-_DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+_DEFAULT_CONFIG_DIR = Path.cwd() / "config"
 runtime_policies: dict[str, object] = {}
 _LOG_DIR = _DEFAULT_CONFIG_DIR.parent / "log"
 

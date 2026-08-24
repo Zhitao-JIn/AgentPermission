@@ -5,7 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "agent-permission"
 version = "0.1.0"
-requires-python = ">=3.10"
+description = "Decorator-based permission guard for Agent tools"
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{name = "Agent Permission Contributors"}]
+
+[tool.setuptools.packages.find]
+include = ["agent_permission*"]
 
 [project.optional-dependencies]
 test = ["pytest>=8"]

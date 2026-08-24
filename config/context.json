@@ -1,0 +1,5 @@
+{
+  "subject_id": "pokemon-agent",
+  "roles": ["player-agent"],
+  "metadata": {"episode_id": "ep-001"}
+}

@@ -1,0 +1,18 @@
+{
+  "roles": {
+    "player-agent": [
+    "agent_permission.examples.pokemon:inspect",
+    "read:game:*"
+    ],
+    "trusted-agent": [
+    "agent_permission.examples.pokemon:*",
+    "execute:game:*"
+    ]
+  },
+  "policies": {
+    "execute:game:save": {
+      "risk": "HIGH",
+      "approval_required": true
+    }
+  }
+}

@@ -11,3 +11,11 @@ class ApprovalRequired(Exception):
     def __init__(self, approval_id: str) -> None:
         self.approval_id = approval_id
         super().__init__(f"Approval required: {approval_id}")
+
+
+class ApprovalRejected(Exception):
+    pass
+
+
+class ApprovalExpired(Exception):
+    pass

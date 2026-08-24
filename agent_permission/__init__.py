@@ -31,7 +31,12 @@ def set_current_context(context: PermissionContext) -> None:
 
 _DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
 runtime_policies: dict[str, object] = {}
-approval_store = LocalFileApprovalStore(_DEFAULT_CONFIG_DIR / "approvals.json")
+_LOG_DIR = _DEFAULT_CONFIG_DIR.parent / "log"
+
+
+def get_approval_store(permission: str) -> LocalFileApprovalStore:
+    safe_permission = permission.replace(":", "_").replace("/", "_")
+    return LocalFileApprovalStore(_LOG_DIR / f"data_{safe_permission}.json")
 
 
 def initialize(
@@ -62,7 +67,7 @@ __all__ = [
     "initialize",
     "runtime_context",
     "runtime_policies",
-    "approval_store",
+    "get_approval_store",
     "set_current_context",
     "permission_guard",
     "require_permission",

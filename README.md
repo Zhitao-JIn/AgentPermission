@@ -90,6 +90,10 @@ def another_tool(state):
 
 每次权限检查都会通过 `get_current_context()` 获取当前 context，不缓存调用时的身份。
 
+身份是**全进程唯一**的普通模块级全局：`set_current_context()` 一调，所有线程立刻看到新的那个，
+调用方把受保护的函数放进线程池不需要做任何搬运。代价是同一进程内不能并发跑两个不同 subject，
+见「当前边界」。
+
 ## 审批
 
 配置了 `approval_required: true` 的权限会进入控制台审批流程：
@@ -167,3 +171,8 @@ python -m pip install git+https://github.com/Zhitao-JIn/AgentPermission.git
 ## 当前边界
 
 当前版本不包含数据库、Web 审批界面、分布式锁、跨进程审批等待或远程服务器连接。本地 JSON 和控制台用于模拟这些外部能力。
+
+**同一进程内只能有一个身份。** 身份存在普通模块级全局里，换成 ContextVar 就能按上下文隔离、
+支持 multi-agent，但那样调用方必须自己把身份搬进每个 worker 线程/task——不搬的话身份会静默
+退化成 `anonymous`，而角色表是普通全局、跨线程完好，症状于是表现为"并发时权限全被拒"，
+且单线程路径一切正常。这个取舍选了"少一个能力，换掉一整类不会在开发期暴露的失效"。

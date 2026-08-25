@@ -1,6 +1,5 @@
 import json
 import inspect
-from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -18,17 +17,33 @@ class PermissionContext:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
-_current_context: ContextVar[PermissionContext | None] = ContextVar(
-    "agent_permission_context", default=None
-)
+_current_context: PermissionContext | None = None
+"""当前身份。**普通模块级全局，不是 ContextVar。**
+
+语义是「全进程唯一，每次 episode 由 `@initialize` 重置一次」。
+用 ContextVar 表达这个语义是错的：ContextVar 全局的只是**变量对象本身**，
+值存在「当前执行上下文」那张映射表里，而新起的线程带的是一张空表 ——
+`get()` 落到 `default=None`，于是 worker 线程里 `runtime_roles`（普通全局）
+是好的、身份却退化成 anonymous，所有权限检查静默 DENIED。
+
+这个失效**只在多线程路径上出现**，单线程调用一切正常，所以它不会在开发期暴露，
+只会在调用方某天为了降低延迟把调用并发化之后，表现为"权限突然全被拒"。
+
+代价，写在这里而不是留给使用方猜：**同一进程内不能并发跑两个不同 subject。**
+要支持 multi-agent 时再换回 ContextVar，届时必须同时提供跨线程/跨任务的
+搬运手段（`copy_context()` 或线程池 `initializer`），不能只把类型换回去。
+"""
 
 
 def get_current_context() -> PermissionContext | None:
-    return _current_context.get()
+    """取当前身份。未初始化时返回 None（调用方按 anonymous 处理）。"""
+    return _current_context
 
 
 def set_current_context(context: PermissionContext) -> None:
-    _current_context.set(context)
+    """换掉当前身份。**立即对所有线程生效**，见 `_current_context` 的说明。"""
+    global _current_context
+    _current_context = context
 
 _DEFAULT_CONFIG_DIR = Path.cwd() / "config"
 runtime_policies: dict[str, object] = {}

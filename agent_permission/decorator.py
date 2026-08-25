@@ -6,7 +6,6 @@ from .audit import *
 from .errors import PermissionDenied
 from .rbac import DENIED,ALLOWED,APPROVAL_REQUIRED, is_allowed
 
-from . import get_approval_store
 from .errors import ApprovalExpired, ApprovalRejected
 
 P = ParamSpec("P")
@@ -53,6 +52,11 @@ def _guard(function: Callable[P, R], explicit: str | None) -> Callable[P, R]:
                 permission=permission,
                 function_name=function.__qualname__,
             )
+            # 和上面的 `get_current_context` 一样延迟导入：`__init__` 在自己
+            # 执行到第 8 行时才 import 本模块，那时 `get_approval_store` 还没定义，
+            # 顶层 import 会直接把整个包变成 import 不进来的状态。
+            from . import get_approval_store
+
             approval_store = get_approval_store(permission)
             approval_store.create(request)
             wait_for_console_approval(request, approval_store)

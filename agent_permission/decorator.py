@@ -4,7 +4,10 @@ from typing import Any, Callable, ParamSpec, TypeVar, cast
 
 from .audit import *
 from .errors import PermissionDenied
-from .rbac import is_allowed
+from .rbac import DENIED,ALLOWED,APPROVAL_REQUIRED, is_allowed
+
+from . import get_approval_store
+from .errors import ApprovalExpired, ApprovalRejected
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -31,7 +34,8 @@ def _guard(function: Callable[P, R], explicit: str | None) -> Callable[P, R]:
             permission=permission,
             function_name=function.__qualname__,
         )
-        if not is_allowed(permission, roles):
+        authorization = is_allowed(permission, roles)
+        if authorization == DENIED:
             audit.record(
                 event=AuditEventType.PERMISSION_DENIED,
                 subject_id=subject_id,
@@ -39,10 +43,7 @@ def _guard(function: Callable[P, R], explicit: str | None) -> Callable[P, R]:
                 function_name=function.__qualname__,
             )
             raise PermissionDenied(subject_id, permission)
-        from . import get_approval_store, runtime_policies
-        from .errors import ApprovalExpired, ApprovalRejected
-        policy = runtime_policies.get(permission, {})
-        if isinstance(policy, dict) and policy.get("approval_required", False):
+        if authorization == APPROVAL_REQUIRED:
             from .approval import ApprovalRequest
             from .approval import wait_for_console_approval
             request = ApprovalRequest(permission, subject_id, function.__qualname__)

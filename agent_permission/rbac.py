@@ -1,11 +1,8 @@
 from typing import Mapping
 
-_role_permissions: dict[str, set[str]] = {}
-
-
-def configure_role_permissions(roles: Mapping[str, set[str] | list[str]]) -> None:
-    global _role_permissions
-    _role_permissions = {str(role): set(values) for role, values in roles.items()}
+DENIED = 0
+ALLOWED = 1
+APPROVAL_REQUIRED = 2
 
 
 def permission_matches(required: str, granted: str) -> bool:
@@ -22,9 +19,18 @@ def permission_matches(required: str, granted: str) -> bool:
 def is_allowed(
     required: str,
     roles: set[str] | frozenset[str],
-) -> bool:
-    return any(
+) -> int:
+    from . import runtime_roles
+    from . import runtime_policies
+
+    permitted = any(
         permission_matches(required, granted)
         for role in roles
-        for granted in _role_permissions.get(role, set())
+        for granted in runtime_roles.get(role, set())
     )
+    if not permitted:
+        return DENIED
+    policy = runtime_policies.get(required, {})
+    if isinstance(policy, dict) and policy.get("approval_required", False):
+        return APPROVAL_REQUIRED
+    return ALLOWED

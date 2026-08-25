@@ -8,7 +8,6 @@ from functools import wraps
 
 from .decorator import permission_guard, require_permission
 from .errors import ApprovalRequired, PermissionDenied
-from .rbac import configure_role_permissions
 from .stores import LocalFileApprovalStore
 
 
@@ -33,6 +32,7 @@ def set_current_context(context: PermissionContext) -> None:
 
 _DEFAULT_CONFIG_DIR = Path.cwd() / "config"
 runtime_policies: dict[str, object] = {}
+runtime_roles: dict[str, set[str]] = {}
 _initialized = False
 _LOG_DIR = _DEFAULT_CONFIG_DIR.parent / "log"
 
@@ -56,7 +56,11 @@ def _load_runtime(
     permissions = json.loads(Path(permissions_path).read_text(encoding="utf-8"))
     global runtime_policies
     runtime_policies = permissions.get("policies", {})
-    configure_role_permissions(permissions.get("roles", permissions))
+    global runtime_roles
+    runtime_roles = {
+        str(role): set(values)
+        for role, values in permissions.get("roles", permissions).items()
+    }
     global _initialized
     _initialized = True
     return context
@@ -104,6 +108,7 @@ __all__ = [
     "requires_initialization",
     "runtime_context",
     "runtime_policies",
+    "runtime_roles",
     "get_approval_store",
     "set_current_context",
     "permission_guard",

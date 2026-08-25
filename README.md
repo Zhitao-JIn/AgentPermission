@@ -2,63 +2,80 @@
 
 一个通过 Python 装饰器保护 Agent 工具函数的轻量权限库。
 
-当前版本使用本地 JSON 文件模拟服务器返回的运行上下文和权限策略：
-
-```text
-import agent_permission
-    ↓
-自动读取 config/context.json
-自动读取 config/permissions.json
-    ↓
-调用带装饰器的工具函数
-    ↓
-RBAC 权限检查
-    ↓
-允许执行，或拒绝执行
-```
+当前版本使用本地 JSON 文件模拟服务器返回的运行上下文、角色权限和风险策略。
 
 ## 快速使用
 
 ```python
-from agent_permission import permission_guard, require_permission
+from agent_permission import (
+    initialize,
+    permission_guard,
+    requires_initialization,
+    require_permission,
+)
 
 
-@permission_guard
+@initialize
+def run_agent():
+    # 调用函数前会自动重新读取 context.json 和 permissions.json
+    return "initialized"
+
+
+@requires_initialization
+@require_permission("read:game:inspect")
 def inspect(state):
     return state
 
 
-@require_permission("execute:game:save")
-def save(state):
+@permission_guard
+def another_tool(state):
     return state
 ```
 
-`@permission_guard` 默认使用函数的完整名称作为权限名：
+装饰器含义：
+
+- `@initialize`：执行被装饰函数前，先加载本地 context、roles 和 policies。
+- `@requires_initialization`：要求权限系统已经初始化；未初始化时抛出 `RuntimeError`，不会执行函数。
+- `@permission_guard`：使用函数完整名称作为权限名并执行权限检查。
+- `@require_permission("...")`：使用显式权限名执行权限检查。
+
+权限检查失败时，原函数不会执行。
+
+## 配置位置
+
+配置从 Python 进程启动目录下的 `config/` 读取：
 
 ```text
-模块路径:函数限定名
+启动目录/
+├── config/
+│   ├── context.json
+│   └── permissions.json
+└── log/
 ```
 
-`@require_permission("...")` 可以显式指定权限名，推荐用于稳定的业务权限。
-
-## 本地配置
-
-`config/context.json` 保存当前运行上下文：
+`context.json`：
 
 ```json
 {
   "subject_id": "pokemon-agent",
   "roles": ["player-agent"],
-  "metadata": {"episode_id": "ep-001"}
+  "metadata": {
+    "episode_id": "ep-001"
+  }
 }
 ```
 
-`config/permissions.json` 同时保存角色权限和风险策略：
+`permissions.json`：
 
 ```json
 {
   "roles": {
-    "player-agent": ["read:game:*"]
+    "player-agent": [
+      "read:game:*"
+    ],
+    "trusted-agent": [
+      "execute:game:*"
+    ]
   },
   "policies": {
     "execute:game:save": {
@@ -69,31 +86,42 @@ def save(state):
 }
 ```
 
-导入 `agent_permission` 时，默认配置会自动加载。每次权限检查都会通过 `get_current_context()` 获取当前 context。
+`roles` 决定主体是否拥有权限；`policies` 决定拥有权限后是否需要审批。
+
+每次权限检查都会通过 `get_current_context()` 获取当前 context，不缓存调用时的身份。
 
 ## 审批
 
-高风险权限会在控制台显示审批详情，并等待最多 10 秒：
+配置了 `approval_required: true` 的权限会进入控制台审批流程：
 
 ```text
-approve  # 执行原函数
+approve  # 批准并执行原函数
 reject   # 拒绝执行
 ```
 
-审批状态写入按权限划分的文件：
+审批等待时间为 10 秒。拒绝、超时或权限不足时，原函数不会执行。
+
+审批状态按权限保存到独立文件：
 
 ```text
 log/data_execute_game_save.json
 ```
 
-审批拒绝或超时，原函数不会执行。
+审批状态包括：
+
+```text
+PENDING → APPROVED
+PENDING → REJECTED
+PENDING → EXPIRED
+```
 
 ## 审计
 
-审计事件由 `AuditService` 追加写入：
+审计模块负责将权限和审批事件追加写入 JSONL 文件：
 
 ```python
 from agent_permission.audit import AuditEventType, audit
+
 
 audit.record(
     event=AuditEventType.PERMISSION_DENIED,
@@ -103,23 +131,39 @@ audit.record(
 )
 ```
 
-默认文件为：
+默认输出：
 
 ```text
 log/audit.jsonl
 ```
 
-## 测试
+审计记录是历史事件；审批文件保存的是当前审批状态，两者分开存储。
 
-安装测试依赖后运行：
+## 运行测试
 
-```text
+```powershell
 python -m pip install -e ".[test]"
 python -m pytest -q
 ```
 
 测试覆盖权限允许、权限拒绝、同步/异步装饰器、审批状态、审批文件和审批集成流程。
 
+## 打包和安装
+
+本地构建：
+
+```powershell
+python -m build
+```
+
+从 GitHub 安装：
+
+```powershell
+python -m pip install git+https://github.com/Zhitao-JIn/AgentPermission.git
+```
+
+使用方需要从自己的项目根目录启动 Python，并准备上述 `config/` 文件。
+
 ## 当前边界
 
-当前版本不包含数据库、Web 审批界面、分布式锁、跨进程审批等待或远程服务器连接。LocalFile 存储和本地 JSON 配置用于模拟这些外部能力。
+当前版本不包含数据库、Web 审批界面、分布式锁、跨进程审批等待或远程服务器连接。本地 JSON 和控制台用于模拟这些外部能力。

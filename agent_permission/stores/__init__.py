@@ -1,3 +1,3 @@
-from .local_file import LocalFileApprovalStore
+from .in_memory import InMemoryApprovalStore
 
-__all__ = ["LocalFileApprovalStore"]
+__all__ = ["InMemoryApprovalStore"]

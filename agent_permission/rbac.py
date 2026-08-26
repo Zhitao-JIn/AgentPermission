@@ -1,4 +1,4 @@
-from typing import Mapping
+from .runtime import get_runtime_policies, get_runtime_roles
 
 DENIED = 0
 ALLOWED = 1
@@ -20,9 +20,9 @@ def is_allowed(
     required: str,
     roles: set[str] | frozenset[str],
 ) -> int:
-    from . import runtime_roles
-    from . import runtime_policies
-
+    # 走 getter 而不是导入全局：那两个字典每轮会被整个重新绑定，
+    # 顶层 import 绑的是初始空字典。
+    runtime_roles = get_runtime_roles()
     permitted = any(
         permission_matches(required, granted)
         for role in roles
@@ -30,7 +30,7 @@ def is_allowed(
     )
     if not permitted:
         return DENIED
-    policy = runtime_policies.get(required, {})
+    policy = get_runtime_policies().get(required, {})
     if isinstance(policy, dict) and policy.get("approval_required", False):
         return APPROVAL_REQUIRED
     return ALLOWED

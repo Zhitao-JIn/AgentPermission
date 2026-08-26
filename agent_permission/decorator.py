@@ -3,9 +3,11 @@ from functools import wraps
 from typing import Any, Callable, ParamSpec, TypeVar, cast
 from uuid import uuid4
 
+from .approval import ApprovalRequest, wait_for_console_approval
 from .audit import AuditEventType, audit
 from .errors import ApprovalExpired, ApprovalRejected, PermissionDenied
 from .rbac import ALLOWED, APPROVAL_REQUIRED, DENIED, is_allowed
+from .runtime import approval_store, get_current_context
 
 P = ParamSpec("P")
 R = TypeVar("R")
@@ -24,18 +26,24 @@ def require_permission(permission: str) -> Callable[[Callable[P, R]], Callable[P
 
 def _guard(function: Callable[P, R], explicit: str | None) -> Callable[P, R]:
     def check_permission() -> None:
-        from . import get_current_context
-
         context = get_current_context()
-        subject_id = context.subject_id if context else "anonymous"
-        roles = context.roles if context else frozenset()
+        if context is None:
+            # 不退化成 anonymous。退化的话症状是「所有权限都被拒」，
+            # 而真实原因是「没初始化」，查的人会去翻 permissions.json。
+            raise RuntimeError(
+                f"{function.__qualname__} was called before the permission runtime was "
+                "initialized — wrap the entry point with @initialize"
+            )
+
+        subject_id = context.subject_id
+        roles = context.roles
         permission = explicit or f"{function.__module__}:{function.__qualname__}"
 
         # 一次守卫调用内所有审计记录共用一个 trace_id。审批分支会产生四条记录，
         # 没有它就无法把 checked / created / approved / allowed 串成一条链
         # —— episode_id 的粒度是一整次 run，同名的 checked/allowed 对有几十组，串不起来。
         chain: dict[str, Any] = {
-            "episode_id": context.episode_id if context else "unbound",
+            "episode_id": context.episode_id,
             "trace_id": str(uuid4()),
         }
 
@@ -48,7 +56,6 @@ def _guard(function: Callable[P, R], explicit: str | None) -> Callable[P, R]:
         )
 
         authorization = is_allowed(permission, roles)
-        approval_id: str | None = None
 
         if authorization == DENIED:
             reason = f"no role in {sorted(roles)} grants {permission!r}"
@@ -63,30 +70,22 @@ def _guard(function: Callable[P, R], explicit: str | None) -> Callable[P, R]:
             raise PermissionDenied(subject_id, permission)
 
         if authorization == APPROVAL_REQUIRED:
-            from .approval import ApprovalRequest, wait_for_console_approval
-
             request = ApprovalRequest(permission, subject_id, function.__qualname__)
-            approval_id = request.approval_id
             audit.record(
                 event=AuditEventType.APPROVAL_CREATED,
-                approval_id=approval_id,
+                approval_id=request.approval_id,
                 subject_id=subject_id,
                 permission=permission,
                 function_name=function.__qualname__,
                 **chain,
             )
-            # 和上面的 `get_current_context` 一样延迟导入：`__init__` 在自己
-            # 执行到第 9 行时才 import 本模块，那时 `approval_store` 还没定义，
-            # 顶层 import 会直接把整个包变成 import 不进来的状态。
-            from . import approval_store
-
             approval_store.create(request)
             wait_for_console_approval(request, approval_store)
 
             if request.status.value == "EXPIRED":
                 audit.record(
                     event=AuditEventType.APPROVAL_EXPIRED,
-                    approval_id=approval_id,
+                    approval_id=request.approval_id,
                     subject_id=subject_id,
                     permission=permission,
                     function_name=function.__qualname__,
@@ -98,7 +97,7 @@ def _guard(function: Callable[P, R], explicit: str | None) -> Callable[P, R]:
             if request.status.value != "APPROVED":
                 audit.record(
                     event=AuditEventType.APPROVAL_REJECTED,
-                    approval_id=approval_id,
+                    approval_id=request.approval_id,
                     subject_id=subject_id,
                     permission=permission,
                     function_name=function.__qualname__,
@@ -109,7 +108,7 @@ def _guard(function: Callable[P, R], explicit: str | None) -> Callable[P, R]:
 
             audit.record(
                 event=AuditEventType.APPROVAL_APPROVED,
-                approval_id=approval_id,
+                approval_id=request.approval_id,
                 subject_id=subject_id,
                 permission=permission,
                 function_name=function.__qualname__,
@@ -120,9 +119,10 @@ def _guard(function: Callable[P, R], explicit: str | None) -> Callable[P, R]:
         assert authorization in (ALLOWED, APPROVAL_REQUIRED), (
             f"unreachable: authorization {authorization!r} was neither denied nor handled"
         )
+        # 不带 approval_id：审批链到 `APPROVAL_APPROVED` 就结束了，这条是守卫自己的结论。
+        # 四条审批记录本来就被同一个 trace_id 串着，再带一次是冗余。
         audit.record(
             event=AuditEventType.PERMISSION_ALLOWED,
-            approval_id=approval_id,
             subject_id=subject_id,
             permission=permission,
             function_name=function.__qualname__,
